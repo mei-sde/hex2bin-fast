@@ -2,6 +2,7 @@ use std::env;
 use std::fs::File;
 use std::io::{self, Read, Write, BufWriter};
 use rayon::prelude::*;
+use memmap2::Mmap;
 
 // 高速な16進数変換用のルックアップテーブル
 const HEX_LOOKUP: [u8; 256] = [
@@ -115,12 +116,31 @@ fn main() -> io::Result<()> {
     }
 
     // 入力ソースの選択
-    let input_bytes: Vec<u8> = if config.input_path == "-" {
+    let input_bytes: Vec<u8>;
+    let _input_file: Option<File>;  // mmapのライフタイム維持用
+    let input_mmap: Option<Mmap>;
+    
+    if config.input_path == "-" {
+        // stdinから読み込み
         let mut buf = Vec::new();
         io::stdin().read_to_end(&mut buf)?;
-        buf
+        input_bytes = buf;
+        _input_file = None;
+        input_mmap = None;
     } else {
-        std::fs::read(&config.input_path)?
+        // ファイルをメモリマップ
+        let file = File::open(&config.input_path)?;
+        let mmap = unsafe { Mmap::map(&file)? };
+        input_bytes = Vec::new();
+        _input_file = Some(file);  // mmapが有効な間、fileを保持
+        input_mmap = Some(mmap);
+    }
+    
+    // 処理対象のバイトスライスを取得
+    let input_data: &[u8] = if let Some(ref mmap) = input_mmap {
+        &mmap[..]
+    } else {
+        &input_bytes[..]
     };
 
     // 並列処理の場合はフィルタリングと変換を同時に並列化
@@ -128,7 +148,7 @@ fn main() -> io::Result<()> {
         // 大きなチャンク単位で並列処理（フィルタリング + 変換を同時に）
         const CHUNK_SIZE: usize = 16 * 1024 * 1024; // 16MB単位
         
-        input_bytes
+        input_data
             .par_chunks(CHUNK_SIZE)
             .flat_map(|chunk| {
                 // 各チャンク内でフィルタリングと変換を実行
@@ -154,7 +174,7 @@ fn main() -> io::Result<()> {
             .collect()
     } else {
         // シングルスレッド版
-        let hexstr: Vec<u8> = input_bytes
+        let hexstr: Vec<u8> = input_data
             .iter()
             .copied()
             .filter(|&b| (b >= b'0' && b <= b'9') || (b >= b'A' && b <= b'F') || (b >= b'a' && b <= b'f'))

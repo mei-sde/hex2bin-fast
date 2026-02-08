@@ -8,7 +8,7 @@ fn main() {
             .set("FileDescription", "High-performance hexadecimal to binary converter")
             .set("CompanyName", "mei-sde")
             .set("LegalCopyright", "© 2026 mei-sde")
-            .set("ProductVersion", "0.5.0");
+            .set("ProductVersion", "0.5.1");
         
         res.compile().unwrap();
     }

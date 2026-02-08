@@ -143,33 +143,38 @@ fn main() -> io::Result<()> {
         &input_bytes[..]
     };
 
-    // 並列処理の場合はフィルタリングと変換を同時に並列化
+    // 並列処理の場合はフィルタリングと変換を両方並列化
     let bytes: Vec<u8> = if config.parallel {
-        // 大きなチャンク単位で並列処理（フィルタリング + 変換を同時に）
+        // 大きなチャンク単位でフィルタリングを並列化
         const CHUNK_SIZE: usize = 16 * 1024 * 1024; // 16MB単位
         
-        input_data
+        let hexstr: Vec<u8> = input_data
             .par_chunks(CHUNK_SIZE)
             .flat_map(|chunk| {
-                // 各チャンク内でフィルタリングと変換を実行
-                let mut result = Vec::with_capacity(chunk.len() / 2);
-                let mut hex_chars = Vec::with_capacity(chunk.len());
-                
-                // フィルタリング
-                for &b in chunk {
-                    if (b >= b'0' && b <= b'9') || (b >= b'A' && b <= b'F') || (b >= b'a' && b <= b'f') {
-                        hex_chars.push(b);
-                    }
-                }
-                
-                // 16進数からバイナリへ変換
-                for pair in hex_chars.chunks(2) {
-                    if pair.len() == 2 {
-                        result.push(hex_to_byte(pair[0], pair[1]));
-                    }
-                }
-                
-                result
+                // 各チャンク内で16進数文字のみをフィルタリング
+                chunk
+                    .iter()
+                    .copied()
+                    .filter(|&b| (b >= b'0' && b <= b'9') || (b >= b'A' && b <= b'F') || (b >= b'a' && b <= b'f'))
+                    .collect::<Vec<u8>>()
+            })
+            .collect();
+        
+        // 変換も並列化（チャンク境界でペアが壊れないように偶数単位で分割）
+        const CONVERSION_CHUNK_SIZE: usize = 8 * 1024 * 1024; // 8MB単位
+        hexstr
+            .par_chunks(CONVERSION_CHUNK_SIZE)
+            .flat_map(|chunk| {
+                chunk
+                    .chunks(2)
+                    .filter_map(|pair| {
+                        if pair.len() == 2 {
+                            Some(hex_to_byte(pair[0], pair[1]))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<u8>>()
             })
             .collect()
     } else {
